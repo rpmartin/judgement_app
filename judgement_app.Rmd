@@ -43,28 +43,45 @@ runtime: shiny
   historic_start <- 2010
   historic_end <- 2019
   #read in the dataframes----
-  df <- read_feather(here("data_for_app", "df.feather"))#employment data
+  obs <- read_feather(here("data_for_app", "observations.feather"))#employment data
   old_forecast <- read_feather(here("data_for_app", "old_forecast.feather"))%>%
     rename(employment = forecast)
-  driver_data <- read_feather(here("data_for_app", "driver_data.feather"))#need to fix
-  constraint <- read_csv(here("raw_data", "constraint.csv"))
+  driver_data <- read_feather(here("data_for_app", "driver_data.feather"))
+  constraint <- read_csv(here("raw_data", "constraint.csv"), col_types =cols(
+  year = col_double(),
+  employment = col_double()
+))
   #variables----
   end_of_horizon <- year(today()) + 11#the last period to forecast
-  forecast_years <- max(df$year)+1:11 #for the slider inputs
-  first_year_of_forecast <- max(df$year)+1 #forecast cagr and plot annotations relative to this date.
-  series <- unique(df$industry)#the industries
+  forecast_years <- max(obs$year)+1:11 #for the slider inputs
+  first_year_of_forecast <- max(obs$year)+1 #forecast cagr and plot annotations relative to this date.
+  we_forecast_this_already <- paste0("LMO ", first_year_of_forecast)#for labeling the forecast we have already made.
+  last_years_forecast <- paste0("LMO ", first_year_of_forecast-1)#for labeling last years forecast
+  series <- unique(obs$industry)#the industries
   industries_with_driver_data <- unique(driver_data$industry) #driver data is available for limited set of industries.
-  
+  old_col_names <- c("Start Year", "End Year", paste0(last_years_forecast," CAGR"))
+  new_col_names <- c("Start Year", "End Year", paste0(we_forecast_this_already," CAGR"))
   #preliminary calculations----
-  industry_share_last_year <- df%>%
+  industry_share_last_year <- obs%>%
     filter(year == max(year), industry != "ind00-ALL")%>%
-    summarize(industry_proportion = round(100*employment/sum(employment), 2),
+    summarize(industry_proportion = 100*employment/sum(employment),
               industry = industry)
-  current_forecasts <- read_csv(here("forecast_output", "forecasts.csv"))%>%#reads in the forecasts made thus far...
-    group_by(industry, year)%>%
-    summarise(adjusted_forecast = last(adjusted_forecast),# and keeps only the last forecast made
-              .model=last(.model))
-  forecast_already <- unique(current_forecasts$industry)#which industries have we forecast already?
+  
+  if(file.exists(here("forecast_output", "forecasts.csv"))){# if we have made some forecasts this file exists
+  current_forecasts <- read_csv(here("forecast_output", "forecasts.csv"), col_types = cols(
+  industry = col_character(),
+  year = col_double(),
+  .model = col_character(),
+  raw_forecast = col_double(),
+  adjusted_forecast = col_double()))
+  current_forecasts <- current_forecasts%>%#reads in the forecasts made thus far...
+      group_by(industry, year)%>%
+      summarise(adjusted_forecast = last(adjusted_forecast),# and keeps only the last forecast made
+                .model=last(.model))
+    forecast_already <- unique(current_forecasts$industry)#which industries have we forecast already?
+  }else{
+    forecast_already <- NULL
+  }
 ```
 
 Column {.sidebar}
@@ -81,7 +98,7 @@ selectInput("show_zero", label = "Should y axis extend to zero?",
 # selectInput("show_arima_old", label = "Show the old auto.arima?",
 #             choices = c(TRUE, FALSE), selected = FALSE)
 selectInput("train_vs_test", label = "First year of test set",
-            choices = (max(df$year)-5):(max(df$year)+1) , selected = max(df$year)-5)
+            choices = (max(obs$year)-5):(max(obs$year)+1) , selected = max(obs$year)-5)
 selectInput("chosen", 
             label = "Adjust which model?",
             choices = c("All",
@@ -91,7 +108,7 @@ selectInput("chosen",
                       "Exponential Smoothing",
                       "Arima",
                       "Random Walk with Drift",
-                      "LMO 2021",
+                      last_years_forecast,
                       "Driver Data"), 
             selected = "All")
 
@@ -147,7 +164,7 @@ Column
 renderPlot({
   #set the forecast horizon----
   horizon <- as.numeric(end_of_horizon)-as.numeric(input$train_vs_test)
-  #read in the forecast made already for feedback regarding budget constraint----
+  #read in the forecast already made this year (for feedback regarding budget constraint)----
   if(file.exists(here("forecast_output", "forecasts.csv"))){# if we have made some forecasts this file exists
     forecasts <- read_csv(here("forecast_output", "forecasts.csv"))%>%
       group_by(industry, year)%>%
@@ -155,14 +172,14 @@ renderPlot({
     forecasted_industries <- forecasts%>%
       select(industry)%>%
       distinct()
-    `Percent Forecasted`<- inner_join(industry_share_last_year, forecasted_industries)%>%
+    `Percent Forecasted`<- inner_join(industry_share_last_year, forecasted_industries, by="industry")%>%
       summarize(sum(industry_proportion))%>%
       pull()
     forecasted_by_year<- forecasts%>%
       filter(year < mean(year))%>% #only for the first 5 years of forecast
       group_by(year)%>%
       summarize(total = sum(adjusted_forecast))%>%
-      inner_join(constraint)%>% #the budget constraint (top line employment)
+      inner_join(constraint, by="year")%>% #the budget constraint (top line employment)
       mutate(`Industries Forecasted` = nrow(forecasted_industries),
              `Percent Forecasted` = `Percent Forecasted`,
              `Forecasts / Constraint` = round(100*total/employment, 2))%>%
@@ -174,33 +191,35 @@ renderPlot({
                                 `Forecasts / Constraint` = rep(0,5)
                                  )
   }
-  #modify last year's forecast to be bound to new forecasts----
+  #modify last year's forecast to be row bound to new forecasts----
   old_forecast <- old_forecast%>%
       filter(industry == input$series)%>%
-    mutate(.model="LMO 2021",
+    mutate(.model=last_years_forecast,
            .mean=employment,
+           year=as.numeric(year),
            model_label = if_else(year == max(year), 
                            as.character(.model), 
                            NA_character_))%>%
     select(industry, .model, year, .mean, model_label)
-  #modify driver data to be bound to new forecasts----
+  #modify driver data to be row bound to new forecasts----
   driver_data <- driver_data%>%
       filter(industry == input$series)%>%
     mutate(.model = "Driver Data",
            .mean = employment,
+           year=as.numeric(year),
            model_label = if_else(year == max(year), 
                            as.character(.model), 
                            NA_character_))%>%
     select(industry, .model, year, .mean, model_label)
   #fit the new models----
-  filtered_df <- df%>%
+  filtered_obs <- obs%>%
     filter(industry == input$series)%>%
     mutate(train_vs_test = ifelse(year < input$train_vs_test, "Training", "Testing"),
            train_vs_test=fct_reorder(train_vs_test, year))%>%
     as_tsibble(key = industry, index = year)%>%
     arrange(year)
   if(input$log_transformed == TRUE){
-    fit <- filtered_df %>%
+    fit <- filtered_obs %>%
       filter(train_vs_test == "Training")%>%
       model(`Linear Trend` = TSLM(log(employment) ~ trend()),
             `Holt's` = ETS(log(employment) ~ error("A") + trend("A") + season("N")),
@@ -210,7 +229,7 @@ renderPlot({
             `Random Walk with Drift` = RW(log(employment) ~ drift())
             )
   }else{
-    fit <- filtered_df %>%
+    fit <- filtered_obs %>%
       filter(train_vs_test == "Training")%>%
       model(`Linear Trend` = TSLM(employment ~ trend()),
             `Holt's` = ETS(employment ~ error("A") + trend("A") + season("N")),
@@ -223,13 +242,13 @@ renderPlot({
   #forecast the new models----
   forecasts <- fit %>%
     forecast(h = paste(horizon, " years"))%>% 
-    mutate(model_label = if_else(year == max(year), 
+    mutate(year=as.numeric(year),
+          model_label = if_else(year == max(year), 
                            as.character(.model), 
                            NA_character_))
-  
   #old auto.arima(possible deletion?)----
   # if(input$show_arima_old == TRUE){
-  #   training <- filtered_df%>%
+  #   training <- filtered_obs%>%
   #     filter(train_vs_test == "Training")
   #   ts_employment <- ts(training$employment, start = min(training$year))
   #   old_arima <-  forecast::auto.arima(ts_employment,
@@ -248,8 +267,8 @@ renderPlot({
   #            model_label = "auto.arima")
   # }
   #if there is a test set calculate which model has lowest RMSE----
-  if(input$train_vs_test < max(filtered_df$year)){
-    rmse <- accuracy(forecasts, filter(filtered_df, train_vs_test == "Testing"))%>%
+  if(input$train_vs_test < max(filtered_obs$year)){
+    rmse <- accuracy(forecasts, filter(filtered_obs, train_vs_test == "Testing"))%>%
       select(.model, RMSE)%>%
       rename(`Unadjusted model` = .model)%>%
       arrange(RMSE)
@@ -257,12 +276,15 @@ renderPlot({
       filter(RMSE == min(RMSE))%>%
       pull(`Unadjusted model`)
   }
-  #bind last year's forecasts and driver data to the new forecasts----
+  # row bind last year's forecasts and driver data to the new forecasts----
   forecasts <- forecasts%>%
     as_tibble()%>%
     select(-employment)%>%
     rbind(old_forecast)%>%
     rbind(driver_data)
+  
+  
+  
   #create the ad-hoc adjustment vector----
   adjustment_vector <- c(input$adjust_first,
                         input$adjust_second,
@@ -305,39 +327,39 @@ renderPlot({
   old_forecast_for_cagr <- old_forecast%>%
     select(year,employment=.mean)
   
-  old_cagr <- bind_rows(cagr_percent(filtered_df, historic_start, historic_end),
+  old_cagr <- bind_rows(cagr_percent(filtered_obs, historic_start, historic_end),
                         cagr_percent(old_forecast_for_cagr, first_year_of_forecast-1, first_year_of_forecast+4),
                         cagr_percent(old_forecast_for_cagr, first_year_of_forecast+4, first_year_of_forecast+9),
-                        cagr_percent(old_forecast_for_cagr, first_year_of_forecast-1, first_year_of_forecast+9))%>%
-    rename(`LMO 2021 CAGR` = cagr)
+                        cagr_percent(old_forecast_for_cagr, first_year_of_forecast-1, first_year_of_forecast+9))
+  colnames(old_cagr) <- old_col_names
   #calculation for new cagr table----
   new_cagr <- NULL
   if(nrow(to_disk>0)){
    new_forecast_for_cagr <-to_disk%>%
      select(year, employment = adjusted_forecast)
   
-  new_cagr <- bind_rows(cagr_percent(filtered_df, historic_start, historic_end),
+  new_cagr <- bind_rows(cagr_percent(filtered_obs, historic_start, historic_end),
                         cagr_percent(new_forecast_for_cagr, first_year_of_forecast, first_year_of_forecast+5),
                         cagr_percent(new_forecast_for_cagr, first_year_of_forecast+5, first_year_of_forecast+10),
-                        cagr_percent(new_forecast_for_cagr, first_year_of_forecast, first_year_of_forecast+10))%>%
-    rename(`New forecast CAGR` = cagr) 
+                        cagr_percent(new_forecast_for_cagr, first_year_of_forecast, first_year_of_forecast+10))
+  colnames(new_cagr) <- new_col_names
   }
   
-  #create plot based on filtered_df(only the selected industry)----
+  #create plot based on filtered_obs(the observed employment levels for the selected industry)----
   p <- ggplot()+
-    scale_y_continuous(labels = comma)+
+  #  scale_y_continuous(labels = comma)+
     geom_table_npc(mapping = aes(npcx = c(.05, .3, .95),#add the tables
                               npcy = c(.05,.05,.05),
                               label = list(old_cagr, new_cagr, forecasted_by_year)))+
-    geom_line(filtered_df, mapping=aes(year, 
+    geom_line(filtered_obs, mapping=aes(year, 
                                        employment, 
                                        colour = train_vs_test),
               lwd = 2, 
-              alpha = .25)+
-    geom_point(filter(filtered_df,
+              alpha = .5)+
+    geom_point(filter(filtered_obs,
                       year == historic_start |
                       year == historic_end | 
-                      year == max(filtered_df$year)), 
+                      year == max(filtered_obs$year)), 
                mapping=aes(year, 
                            employment, 
                            colour = train_vs_test), 
@@ -348,19 +370,19 @@ renderPlot({
     scale_x_continuous(limits = c(1997, 2034), 
                        breaks = seq(1998, 2032, 2),
                        labels = seq(1998, 2032, 2))+#leave room for labels
-    geom_label_repel(data = tail(filtered_df, 1),#label the last observed employment level
+    geom_label_repel(data = tail(filtered_obs, 1),#label the last observed employment level
                      mapping = aes(year,
                                  employment,
                                  colour = train_vs_test,
                                  label = label_comma(accuracy = 100)(employment)))+
-    geom_label_repel(data = filter(filtered_df, 
+    geom_label_repel(data = filter(filtered_obs, 
                                   year == historic_start |
                                   year == historic_end), #for historic cagr
                      mapping = aes(year,
                                  employment,
                                  colour = train_vs_test,
                                  label = label_comma(accuracy = 100)(employment)))+
-    geom_label_repel(data = head(filtered_df, 1),#label the training data.
+    geom_label_repel(data = head(filtered_obs, 1),#label the training data.
                      mapping = aes(year,
                                  employment,
                                  colour = train_vs_test,
@@ -391,18 +413,25 @@ renderPlot({
       p <- p+ 
         scale_y_continuous(labels = comma,
                            limits = c(0, 
-                                      max(max(filtered_df$employment), 
+                                      max(max(filtered_obs$employment), 
+                                          max(adjusted_forecasts$adjusted_forecast))))
+    }else{
+      p <- p+ 
+        scale_y_continuous(labels = comma,
+                           limits = c(min(min(filtered_obs$employment), 
+                                          min(adjusted_forecasts$adjusted_forecast)), 
+                                      max(max(filtered_obs$employment), 
                                           max(adjusted_forecasts$adjusted_forecast))))
     }
   #if testing data show best model in bold----
-    if(input$train_vs_test < max(filtered_df$year)){# if there is some testing data bold best model
+    if(input$train_vs_test < max(filtered_obs$year)){# if there is some testing data bold best model
        p <- p+
          geom_line(data = filter(adjusted_forecasts, .model == best), 
                   mapping = aes(year, adjusted_forecast),
                   lwd = 2,
                   colour = "grey50",
                   alpha = .5)+
-        geom_label_repel(data = filtered_df%>%
+        geom_label_repel(data = filtered_obs%>%
                            filter(train_vs_test == "Testing")%>%
                            head(n = 1),#label the testing data.
                      mapping = aes(year,
@@ -464,14 +493,34 @@ renderPlot({
       filter(.model == input$chosen)%>%
       summarize(max(adjusted_forecast))%>%
       pull()
-      if(input$show_zero == TRUE){#change the y axis limits to include zero
+   forecast_min <- adjusted_forecasts%>%
+      filter(.model == input$chosen)%>%
+      summarize(min(adjusted_forecast))%>%
+      pull()
+   if(input$show_zero == TRUE){#change the y axis limits to include zero
         p <- p+ 
           scale_y_continuous(labels=comma, 
-                             limits = c(0,max(max(filtered_df$employment),
+                             limits = c(0,max(max(filtered_obs$employment),
                                                             forecast_max, 
                                                             max(old_forecast$.mean),
                                                             max(driver_data$.mean)
                                                             )))
+      }else{
+         p <- p+ 
+          scale_y_continuous(labels=comma, 
+                             limits = c(min(min(filtered_obs$employment),
+                                                            forecast_min, 
+                                                            min(old_forecast$.mean),
+                                                            min(driver_data$.mean)
+                                                            ),
+                                        max(max(filtered_obs$employment),
+                                                            forecast_max, 
+                                                            max(old_forecast$.mean),
+                                                            max(driver_data$.mean)
+                                                            )))
+        
+        
+        
       } 
   
     }
@@ -484,11 +533,11 @@ renderPlot({
                 lty=2)+
       geom_label_repel(data = filter(current_forecasts, 
                                      industry==input$series & 
-                                      year == max(year)),
+                                      year == min(year)),
                       mapping=aes(year,
                                   adjusted_forecast, 
-                                  label="LMO 2022"), 
-                      nudge_x = 1)
+                                  label=we_forecast_this_already), 
+                      nudge_x = -1)
   }
   #if this is an industry with driver data, show that----
   if(input$series %in% industries_with_driver_data){
@@ -508,7 +557,7 @@ renderPlot({
   #   p <- p+ #add the original arima model (dashed line)
   #     geom_line(data = old_arima_forecast, mapping = aes(year, `Point Forecast`), lty = 2, alpha = .5)+
   #     geom_label_repel(data = filter(old_arima_forecast, year == min(year)),
-  #                      mapping = aes(year, `Point Forecast`, label = model_label), alpha = .25)
+  #                      mapping = aes(year, `Point Forecast`, label = model_label), alpha = .5)
   # }
   #pretty up the labels----
   aest_fix_labs(p)
