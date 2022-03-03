@@ -43,6 +43,10 @@ runtime: shiny
   historic_start <- 2010
   historic_end <- 2019
   #read in the dataframes----
+  assert_that(file.exists(here("data_for_app", "observations.feather")))
+  assert_that(file.exists(here("data_for_app", "old_forecast.feather")))
+  assert_that(file.exists(here("data_for_app", "driver_data.feather")))
+  assert_that(file.exists(here("raw_data", "constraint.csv")))
   obs <- read_feather(here("data_for_app", "observations.feather"))#employment data
   old_forecast <- read_feather(here("data_for_app", "old_forecast.feather"))%>%
     rename(employment = forecast)
