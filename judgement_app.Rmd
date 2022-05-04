@@ -124,6 +124,12 @@ sliderInput("slope", "Change slope",
                   value = 0, step=25)
 
 actionButton("save", "Write forecast to disk")
+```
+
+<br>
+
+```{r}
+actionButton("reset", "Reset")
 
 sliderInput("adjust_first", paste("Adjust ", forecast_years[1]),
                   min = -10000, max = 10000,
@@ -158,6 +164,24 @@ sliderInput("adjust_tenth", paste("Adjust ", forecast_years[10]),
 sliderInput("adjust_eleventh", paste("Adjust ", forecast_years[11]),
                   min = -10000, max = 10000,
                   value = 0, step=50)
+
+
+observeEvent(input$reset, {
+    updateSliderInput(inputId = "location", value = 0)
+    updateSliderInput(inputId = "slope", value = 0)
+    updateSliderInput(inputId = "adjust_first", value = 0)
+    updateSliderInput(inputId = "adjust_second", value = 0)
+    updateSliderInput(inputId = "adjust_third", value = 0)
+    updateSliderInput(inputId = "adjust_fourth", value = 0)
+    updateSliderInput(inputId = "adjust_fifth", value = 0)
+    updateSliderInput(inputId = "adjust_sixth", value = 0)
+    updateSliderInput(inputId = "adjust_seventh", value = 0)
+    updateSliderInput(inputId = "adjust_eighth", value = 0)
+    updateSliderInput(inputId = "adjust_ninth", value = 0)
+    updateSliderInput(inputId = "adjust_tenth", value = 0)
+    updateSliderInput(inputId = "adjust_eleventh", value = 0)
+})
+
 ```
 
 Column
