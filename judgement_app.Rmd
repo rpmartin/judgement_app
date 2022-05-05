@@ -90,13 +90,15 @@ runtime: shiny
 
 Column {.sidebar}
 -----------------------------------------------------------------------
-
+<br>
 ```{r}
 #the inputs----
+actionButton("reset", "Reset to clear adjustments")
+
 selectInput("series", label = "Which industry:",
             choices = series , selected = "ALL")
-selectInput("log_transformed", label = "Should data be log transformed?",
-            choices = c(TRUE, FALSE), selected = TRUE)
+# selectInput("log_transformed", label = "Should data be log transformed?",
+#             choices = c(TRUE, FALSE), selected = TRUE)
 selectInput("show_zero", label = "Should y axis extend to zero?",
             choices = c(TRUE, FALSE), selected = TRUE)
 # selectInput("show_arima_old", label = "Show the old auto.arima?",
@@ -124,46 +126,40 @@ sliderInput("slope", "Change slope",
                   value = 0, step=25)
 
 actionButton("save", "Write forecast to disk")
-```
-
-<br>
-
-```{r}
-actionButton("reset", "Reset")
 
 sliderInput("adjust_first", paste("Adjust ", forecast_years[1]),
                   min = -10000, max = 10000,
-                  value = 0, step=50)
+                  value = 0, step=250)
 sliderInput("adjust_second", paste("Adjust ", forecast_years[2]),
                   min = -10000, max = 10000,
-                  value = 0, step=50)
+                  value = 0, step=250)
 sliderInput("adjust_third", paste("Adjust ", forecast_years[3]),
                   min = -10000, max = 10000,
-                  value = 0, step=50)
+                  value = 0, step=250)
 sliderInput("adjust_fourth", paste("Adjust ", forecast_years[4]),
                   min = -10000, max = 10000,
-                  value = 0, step=50)
+                  value = 0, step=250)
 sliderInput("adjust_fifth", paste("Adjust ", forecast_years[5]),
                   min = -10000, max = 10000,
-                  value = 0, step=50)
+                  value = 0, step=250)
 sliderInput("adjust_sixth", paste("Adjust ", forecast_years[6]),
                   min = -10000, max = 10000,
-                  value = 0, step=50)
+                  value = 0, step=250)
 sliderInput("adjust_seventh",paste("Adjust ", forecast_years[7]),
                   min = -10000, max = 10000,
-                  value = 0, step=50)
+                  value = 0, step=250)
 sliderInput("adjust_eighth", paste("Adjust ", forecast_years[8]),
                   min = -10000, max = 10000,
-                  value = 0, step=50)
+                  value = 0, step=250)
 sliderInput("adjust_ninth", paste("Adjust ", forecast_years[9]),
                   min = -10000, max = 10000,
-                  value = 0, step=50)
+                  value = 0, step=250)
 sliderInput("adjust_tenth", paste("Adjust ", forecast_years[10]),
                   min = -10000, max = 10000,
-                  value = 0, step=50)
+                  value = 0, step=250)
 sliderInput("adjust_eleventh", paste("Adjust ", forecast_years[11]),
                   min = -10000, max = 10000,
-                  value = 0, step=50)
+                  value = 0, step=250)
 
 
 observeEvent(input$reset, {
@@ -246,7 +242,7 @@ renderPlot({
            train_vs_test=fct_reorder(train_vs_test, year))%>%
     as_tsibble(key = industry, index = year)%>%
     arrange(year)
-  if(input$log_transformed == TRUE){
+#  if(input$log_transformed == TRUE){
     fit <- filtered_obs %>%
       filter(train_vs_test == "Training")%>%
       model(`Linear Trend` = TSLM(log(employment) ~ trend()),
@@ -256,17 +252,17 @@ renderPlot({
             `Arima` = ARIMA(log(employment)),
             `Random Walk with Drift` = RW(log(employment) ~ drift())
             )
-  }else{
-    fit <- filtered_obs %>%
-      filter(train_vs_test == "Training")%>%
-      model(`Linear Trend` = TSLM(employment ~ trend()),
-            `Holt's` = ETS(employment ~ error("A") + trend("A") + season("N")),
-            `Damped Holt's` = ETS(employment ~ error("A") + trend("Ad") + season("N")),
-            `Exponential Smoothing` = ETS(employment),
-            `Arima` = ARIMA(employment),
-            `Random Walk with Drift` = RW(employment ~ drift())
-      ) 
-  }
+  # }else{
+  #   fit <- filtered_obs %>%
+  #     filter(train_vs_test == "Training")%>%
+  #     model(`Linear Trend` = TSLM(employment ~ trend()),
+  #           `Holt's` = ETS(employment ~ error("A") + trend("A") + season("N")),
+  #           `Damped Holt's` = ETS(employment ~ error("A") + trend("Ad") + season("N")),
+  #           `Exponential Smoothing` = ETS(employment),
+  #           `Arima` = ARIMA(employment),
+  #           `Random Walk with Drift` = RW(employment ~ drift())
+  #     ) 
+  # }
   #forecast the new models----
   forecasts <- fit %>%
     forecast(h = paste(horizon, " years"))%>% 
